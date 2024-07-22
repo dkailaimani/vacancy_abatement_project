@@ -1,36 +1,29 @@
-import datetime
 import requests
+from bs4 import BeautifulSoup
+import pandas as pd
 import mysql.connector
 from mysql.connector import Error
-from bs4 import BeautifulSoup
-from collections import OrderedDict
-from time import sleep
+
 from password import cloud_password
 
-import pandas as pd
 
-# Function to establish database connection
+# Function to establish MySQL database connection
 def get_db_connection():
-    host = '148.72.118.86'        # Replace with your database host
-    database = 'vacancy_abatement'  # Replace with your database name
-    user = 'dprice'    # Replace with your database username
-    password = cloud_password # Replace with your database password
-
     try:
-        # Connect to MySQL database
         connection = mysql.connector.connect(
-            host=host,
-            database=database,
-            user=user,
-            password=password
+            host='148.72.118.86',
+            database='vacancy_abatement',
+            user='dprice',
+            password=cloud_password
         )
         print("Connected to MySQL database successfully")
         return connection
     except Error as e:
-        print(f"Error: {e}")
+        print(f"Error connecting to MySQL database: {e}")
         return None
 
-# Function to scrape data and insert into database
+
+# Function to scrape data and insert into MySQL database
 def scrape_data(connection):
     if connection is None:
         print("Database connection is not available")
@@ -66,11 +59,12 @@ def scrape_data(connection):
                     soup = BeautifulSoup(html_text, 'html.parser')
 
                     # Dictionary to store property details
-                    property_data = OrderedDict()
+                    property_data = {}
                     property_data['Pin'] = pin  # Store PIN in data
 
                     # Mapping of web page labels to database columns
                     label_to_column = {
+                        'Pin':'Pin',
                         'Address': 'Address',
                         'City': 'City',
                         'Township': 'Township',
@@ -110,9 +104,6 @@ def scrape_data(connection):
                         'Garage Size Type2': 'GarageSizeType2'
                     }
 
-                    # Initialize column_name outside the loop
-                    column_name = None
-
                     # Find all detail row containers
                     detail_rows = soup.find_all(['div', 'span'], class_=['detail-row', 'detail-row--label', 'col-xs-3 pt-header',
                                                                         'col-xs-2', 'detail-row--detail', 'large', 'col-xs-4', 'col-xs-5', 'small'])
@@ -126,7 +117,7 @@ def scrape_data(connection):
                                 property_data[column_name] = None  # Initialize with None
                         elif 'detail-row--detail' in row.get('class', []):
                             value = row.text.strip()
-                            if column_name:  # Ensure there's a column name to map to
+                            if 'column_name' in locals():  # Check if column_name is defined
                                 property_data[column_name] = value
 
                     # Append property data to all_data list
@@ -147,14 +138,15 @@ def scrape_data(connection):
             # Prepare SQL query for insertion
             insert_query = f"""
                 INSERT INTO property_details (
-                    {', '.join(df.columns)}
+                    Pin, Address, City, Township, PropertyClassification, Neighborhood, Taxcode, NextScheduledReassessment, 
+                    Description, Age, BuildingSquareFootage, AssessmentPhase, PreviousBoardCertified, Status, AssessorValuation, 
+                    AssessorPostAppealValuation, AppealNumber, AttorneyTaxRepresentative, Applicant, Result, Reason, TaxYear, 
+                    CertificateNumber, PropertyLocation, COfEDescription, Comments, ResidenceType, Use, Apartments, 
+                    ExteriorConstruction, FullBaths, HalfBaths, Basement1, Attic, CentralAir, NumberOfFireplaces, GarageSizeType2
                 ) VALUES (
-                    {', '.join(['%s'] * len(df.columns))}
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
             """
-
-            # Get current timestamp
-            current_time = datetime.datetime.now()
 
             # Establish connection again for insertion
             conn = get_db_connection()
@@ -166,8 +158,7 @@ def scrape_data(connection):
 
             # Iterate over rows in DataFrame and insert data
             for index, row in df.iterrows():
-                # Replace NaN values with None
-                row_data = [current_time] + [row[attr] if pd.notnull(row[attr]) else None for attr in df.columns]
+                row_data = [row[attr] for attr in df.columns]
 
                 # Execute insertion query
                 cursor.execute(insert_query, tuple(row_data))
